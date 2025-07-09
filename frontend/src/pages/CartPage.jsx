@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { cartAPI } from '../services/api';
-import { Trash2, Plus, Minus, ShoppingCart } from 'lucide-react';
+import { Trash2, Plus, Minus, ShoppingCart, MapPin } from 'lucide-react';
 
 const CartPage = () => {
   const [cartItems, setCartItems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchCartItems();
@@ -60,6 +63,39 @@ const CartPage = () => {
   const proceedToCheckout = () => {
     // This would typically navigate to checkout page
     alert('Checkout functionality would be implemented here');
+  };
+
+  const placeOrder = async () => {
+    if (!deliveryAddress.trim()) {
+      alert('Please enter a delivery address');
+      return;
+    }
+
+    try {
+      setIsPlacingOrder(true);
+      const response = await fetch('http://localhost:8000/orders/place-from-cart', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ delivery_address: deliveryAddress })
+      });
+
+      if (response.ok) {
+        alert('Order placed successfully!');
+        setCartItems([]);
+        setDeliveryAddress('');
+        navigate('/orders');
+      } else {
+        const errorData = await response.json();
+        alert(`Failed to place order: ${errorData.detail}`);
+      }
+    } catch (err) {
+      alert('Failed to place order');
+    } finally {
+      setIsPlacingOrder(false);
+    }
   };
 
   if (isLoading) {
@@ -159,12 +195,55 @@ const CartPage = () => {
                 </span>
               </div>
               
-              <button
-                onClick={proceedToCheckout}
-                className="w-full btn-primary text-lg py-3"
-              >
-                Proceed to Checkout
-              </button>
+              <div className="mb-4">
+                <label htmlFor="delivery-address" className="block text-sm font-medium text-gray-700 mb-1">
+                  Delivery Address
+                </label>
+                <textarea
+                  id="delivery-address"
+                  value={deliveryAddress}
+                  onChange={(e) => setDeliveryAddress(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                  rows="3"
+                  placeholder="Enter your delivery address"
+                />
+              </div>
+              
+              <div className="flex space-x-4">
+                <button
+                  onClick={placeOrder}
+                  className="w-full btn-primary text-lg py-3 flex items-center justify-center"
+                  disabled={isPlacingOrder}
+                >
+                  {isPlacingOrder ? (
+                    <>
+                      <svg
+                        className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8v8H4zm16 0a8 8 0 01-8 8v-8h8z"
+                        />
+                      </svg>
+                      Placing order...
+                    </>
+                  ) : (
+                    'Place Order'
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         )}

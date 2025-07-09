@@ -55,12 +55,11 @@ class Product(ProductBase):
 
 # Order schemas
 class OrderBase(BaseModel):
-    CustomerID: int
     ProductID: int
     Quantity: int
     Price: Decimal
     DeliveryAddress: str
-    OrderStatus: str
+    OrderStatus: str = "Pending"
     DeliveryManID: Optional[int] = None
 
 class OrderCreate(OrderBase):
@@ -72,6 +71,7 @@ class OrderUpdate(BaseModel):
 
 class Order(OrderBase):
     OrderID: int
+    CustomerID: int
     PlacedTime: datetime
     
     class Config:
@@ -182,3 +182,7 @@ class PopularProduct(BaseModel):
     ProductID: int
     ProductName: str
     TotalOrders: int
+
+# Place order request schema
+class PlaceOrderRequest(BaseModel):
+    delivery_address: str

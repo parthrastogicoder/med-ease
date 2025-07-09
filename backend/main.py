@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from typing import List, Optional
@@ -16,7 +17,7 @@ from schemas import (
     SupplierCreate, Supplier as SupplierSchema,
     DeliveryManCreate, DeliveryMan as DeliveryManSchema,
     ReviewCreate, Review as ReviewSchema,
-    UserLogin, Token, AdminLogin,
+    UserLogin, Token, AdminLogin, PlaceOrderRequest,
     CustomerPurchaseStats, DailyOrderStats, DeliveryManRating, PopularProduct
 )
 from auth import verify_password, get_password_hash, create_access_token, verify_token
@@ -24,14 +25,26 @@ from auth import verify_password, get_password_hash, create_access_token, verify
 # Initialize FastAPI app
 app = FastAPI(title="MedEase API", version="1.0.0")
 
-# Configure CORS
+# Configure CORS with more explicit settings
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # React dev server
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Specific origins
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Add explicit OPTIONS handler for preflight requests
+@app.options("/{path:path}")
+async def options_handler(request: Request, path: str):
+    return Response(
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
 
 # Security
 security = HTTPBearer()
@@ -184,9 +197,6 @@ def get_orders(current_user: Customer = Depends(get_current_user), db: Session =
 
 @app.post("/orders", response_model=OrderSchema)
 def create_order(order: OrderCreate, current_user: Customer = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Set customer ID from current user
-    order.CustomerID = current_user.CustomerID
-    
     # Check if product exists and has enough quantity
     product = db.query(Product).filter(Product.ProductID == order.ProductID).first()
     if not product:
@@ -195,8 +205,14 @@ def create_order(order: OrderCreate, current_user: Customer = Depends(get_curren
     if product.Quantity < order.Quantity:
         raise HTTPException(status_code=400, detail="Insufficient product quantity")
     
+    # Get the next available OrderID (since Orders table has auto_increment, this should work)
+    # But if it doesn't, we'll handle it manually
+    order_data = order.dict()
+    order_data['CustomerID'] = current_user.CustomerID
+    order_data['PlacedTime'] = datetime.utcnow()
+    
     # Create order
-    db_order = Order(**order.dict())
+    db_order = Order(**order_data)
     db.add(db_order)
     
     # Update product quantity
@@ -370,6 +386,79 @@ def get_popular_products(limit: int = 5, db: Session = Depends(get_db)):
     """), {"limit": limit}).fetchall()
     
     return [{"ProductID": row[0], "ProductName": row[1], "TotalOrders": row[2]} for row in result]
+
+# Admin order management endpoints
+@app.get("/admin/orders", response_model=List[OrderSchema])
+def get_all_orders(db: Session = Depends(get_db)):
+    orders = db.query(Order).all()
+    return orders
+
+@app.put("/admin/orders/{order_id}", response_model=OrderSchema)
+def admin_update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends(get_db)):
+    db_order = db.query(Order).filter(Order.OrderID == order_id).first()
+    if db_order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    for field, value in order_update.dict(exclude_unset=True).items():
+        setattr(db_order, field, value)
+    
+    db.commit()
+    db.refresh(db_order)
+    return db_order
+
+@app.delete("/admin/orders/{order_id}")
+def admin_delete_order(order_id: int, db: Session = Depends(get_db)):
+    db_order = db.query(Order).filter(Order.OrderID == order_id).first()
+    if db_order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    db.delete(db_order)
+    db.commit()
+    return {"message": "Order deleted successfully"}
+
+# Place order from cart
+@app.post("/orders/place-from-cart", response_model=List[OrderSchema])
+def place_order_from_cart(request: PlaceOrderRequest, current_user: Customer = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Get cart items
+    cart_items = db.query(Cart).filter(Cart.CustomerID == current_user.CustomerID).all()
+    
+    if not cart_items:
+        raise HTTPException(status_code=400, detail="Cart is empty")
+    
+    orders = []
+    for cart_item in cart_items:
+        # Check product availability
+        product = db.query(Product).filter(Product.ProductID == cart_item.ProductID).first()
+        if not product:
+            raise HTTPException(status_code=404, detail=f"Product {cart_item.ProductID} not found")
+        
+        if product.Quantity < cart_item.Quantity:
+            raise HTTPException(status_code=400, detail=f"Insufficient quantity for product {product.Name}")
+        
+        # Create order
+        order_data = {
+            'CustomerID': current_user.CustomerID,
+            'ProductID': cart_item.ProductID,
+            'Quantity': cart_item.Quantity,
+            'Price': cart_item.Price,
+            'DeliveryAddress': request.delivery_address,
+            'OrderStatus': 'Pending',
+            'PlacedTime': datetime.utcnow()
+        }
+        
+        db_order = Order(**order_data)
+        db.add(db_order)
+        
+        # Update product quantity
+        product.Quantity -= cart_item.Quantity
+        
+        orders.append(db_order)
+    
+    # Clear cart
+    db.query(Cart).filter(Cart.CustomerID == current_user.CustomerID).delete()
+    
+    db.commit()
+    return orders
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -42,7 +42,7 @@ const AdminPage = () => {
       const [customersRes, productsRes, ordersRes] = await Promise.all([
         fetch('http://localhost:8000/customers', { headers }),
         fetch('http://localhost:8000/products', { headers }),
-        fetch('http://localhost:8000/orders', { headers })
+        fetch('http://localhost:8000/admin/orders', { headers })
       ]);
 
       if (customersRes.ok) setCustomers(await customersRes.json());
@@ -52,6 +52,30 @@ const AdminPage = () => {
       console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const updateOrderStatus = async (orderId, newStatus) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:8000/admin/orders/${orderId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ OrderStatus: newStatus })
+      });
+
+      if (response.ok) {
+        setOrders(orders.map(order => 
+          order.OrderID === orderId 
+            ? { ...order, OrderStatus: newStatus }
+            : order
+        ));
+      }
+    } catch (error) {
+      console.error('Error updating order status:', error);
     }
   };
 
@@ -256,6 +280,95 @@ const AdminPage = () => {
     </div>
   );
 
+  const OrdersTab = () => (
+    <div className="bg-white rounded-lg shadow-md">
+      <div className="p-6 border-b">
+        <h3 className="text-lg font-semibold text-gray-900">Order Management</h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Order ID
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Customer
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Product
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Amount
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Status
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Date
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {orders.map((order) => (
+              <tr key={order.OrderID}>
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                  #{order.OrderID}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  Customer ID: {order.CustomerID}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  Product ID: {order.ProductID}
+                  <br />
+                  Qty: {order.Quantity}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  ₹{(order.Price * order.Quantity).toFixed(2)}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <select
+                    value={order.OrderStatus}
+                    onChange={(e) => updateOrderStatus(order.OrderID, e.target.value)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium ${
+                      order.OrderStatus === 'Pending'
+                        ? 'bg-yellow-100 text-yellow-800'
+                        : order.OrderStatus === 'Processing'
+                        ? 'bg-blue-100 text-blue-800'
+                        : order.OrderStatus === 'Delivered'
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-red-100 text-red-800'
+                    }`}
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="Processing">Processing</option>
+                    <option value="Shipped">Shipped</option>
+                    <option value="Delivered">Delivered</option>
+                    <option value="Cancelled">Cancelled</option>
+                  </select>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  {new Date(order.PlacedTime).toLocaleDateString()}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                  <button className="text-blue-600 hover:text-blue-900 mr-3">
+                    <Eye className="h-4 w-4" />
+                  </button>
+                  <button className="text-red-600 hover:text-red-900">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -281,6 +394,7 @@ const AdminPage = () => {
               { id: 'dashboard', label: 'Dashboard', icon: TrendingUp },
               { id: 'customers', label: 'Customers', icon: Users },
               { id: 'products', label: 'Products', icon: Package },
+              { id: 'orders', label: 'Orders', icon: ShoppingCart },
             ].map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
@@ -302,6 +416,7 @@ const AdminPage = () => {
           {activeTab === 'dashboard' && <Dashboard />}
           {activeTab === 'customers' && <CustomersTab />}
           {activeTab === 'products' && <ProductsTab />}
+          {activeTab === 'orders' && <OrdersTab />}
         </div>
       </div>
     </div>
